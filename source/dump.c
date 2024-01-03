@@ -5,33 +5,43 @@
 #include "../include/memory.h"
 #include "../include/dump.h"
 
+
 int is_self(const char *fn) {
-  struct stat st;
-  int res = 0;
+  int res = 0; // default value
+  // Attempt to open the file in "read only" mode, and if it 
+  // fails, we return -1
   int fd = open(fn, O_RDONLY, 0);
-  if (fd != -1) {
-    stat(fn, &st);
-    void *addr = mmap(0, 0x4000, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
-    if (addr != MAP_FAILED) {
-      if (st.st_size >= 4) {
-        uint32_t selfMagic = *(uint32_t *)((uint8_t *)addr + 0x00);
-        if (selfMagic == SELF_MAGIC) {
-          uint16_t snum = *(uint16_t *)((uint8_t *)addr + 0x18);
-          if (st.st_size >= (0x20 + snum * 0x20 + 4)) {
-            uint32_t elfMagic = *(uint32_t *)((uint8_t *)addr + 0x20 + snum * 0x20);
-            if (elfMagic == ELF_MAGIC) {
-              res = 1;
-            }
-          }
-        }
-      }
-      munmap(addr, 0x4000);
-    }
+  if (fd == -1) return -1;
+
+  // Attempt to obtain information about the file, and if 
+  // stat() fails close file, and return -1
+  struct stat st = { 0 };
+  if (stat(fn, &st) == -1) {
     close(fd);
+    return -1;
   }
+  
+  void *addr = mmap(NULL, 16384, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+  if (addr == MAP_FAILED) {
+    close(fd);
+    return -1;
+  }
+  
+  if (st.st_size >= 4) {
+    uint32_t selfMagic = *(uint32_t *)((uint8_t *)addr + 0x00);
+    if (selfMagic == SELF_MAGIC) {
+      uint16_t snum = *(uint16_t *)((uint8_t *)addr + 0x18);
+      if (st.st_size >= (0x20 + snum * 0x20 + 4)) {
+        uint32_t elfMagic = *(uint32_t *)((uint8_t *)addr + 0x20 + snum * 0x20);
+        if (elfMagic == ELF_MAGIC) 
+          res = 1;
+      }
+    }
+  }
+  munmap(addr, 16384); // Remove the mapping, previously done by mmap
+  close(fd);           // Close the file
   return res;
 }
-
 #define DECRYPT_SIZE 0x100000
 
 BOOL read_decrypt_segment(int fd, uint64_t index, uint64_t offset, size_t size, uint8_t *out) {
